@@ -1,7 +1,9 @@
 import json
 import os
 import re
+import random
 from datetime import datetime, time
+from pytz import timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,7 +18,9 @@ from telegram.ext import (
 # === Налаштування ===
 TOKEN = "8482451594:AAEhmluDZfwyZaK0m6n49ln-8txdJgKgSc4"
 ADMIN_ID = 662089451
+
 SCHEDULE_FILE = "schedule.json"
+MIXES_FILE = "mixes.json"
 
 GROUP_TOPICS = {
     "DailyDose1": {"chat_id": -1002299751427, "topic_id": 225},
@@ -36,23 +40,40 @@ DAYS = {
     "Sun": "Sunday",
 }
 
+
 # === Перевірка адміна ===
 def is_admin(update: Update) -> bool:
     return update.effective_user and update.effective_user.id == ADMIN_ID
 
 
-# === Робота з файлом ===
-def save_schedule(schedule):
-    with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
-        json.dump(schedule, f, ensure_ascii=False, indent=2)
+# === Робота з файлами ===
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_json(path, default):
+    if not os.path.exists(path):
+        save_json(path, default)
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def load_schedule():
-    if not os.path.exists(SCHEDULE_FILE):
-        save_schedule({})
-        return {}
-    with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return load_json(SCHEDULE_FILE, {})
+
+
+def save_schedule(schedule):
+    save_json(SCHEDULE_FILE, schedule)
+
+
+def load_mixes():
+    return load_json(MIXES_FILE, [])
+
+
+def save_mixes(mixes):
+    save_json(MIXES_FILE, mixes)
 
 
 # === Парсинг графіку ===
@@ -82,6 +103,7 @@ def parse_text_schedule(text: str):
 # === Повідомлення на сьогодні ===
 def get_today_message(schedule, cafe=None):
     today = datetime.today().strftime("%A")
+
     if cafe:
         person = schedule.get(cafe, {}).get(today, "Ніхто не запланований")
         return f"📅 Сьогодні на зміні: {person}"
@@ -90,20 +112,24 @@ def get_today_message(schedule, cafe=None):
     for c in GROUP_TOPICS.keys():
         person = schedule.get(c, {}).get(today, "Ніхто не запланований")
         msg += f"{c}: {person}\n"
+
     return msg
 
 
-# === КОМАНДА START + меню кнопок ===
+# === START ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
     keyboard = [
         [InlineKeyboardButton("📅 Показати сьогодні", callback_data="show")],
+        [InlineKeyboardButton("🗓 Графік на тиждень", callback_data="show_week")],
         [InlineKeyboardButton("🔄 Змінити зміну", callback_data="update")],
         [InlineKeyboardButton("📝 Макет графіку", callback_data="template")],
+        [InlineKeyboardButton("➕ Додати мікс", callback_data="addmix_btn")],
         [InlineKeyboardButton("📨 Тестова розсилка", callback_data="testsend")],
     ]
+
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.effective_chat.type != "private":
@@ -115,12 +141,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "Привіт! Використовуй кнопки нижче для роботи з графіком:",
+        "Привіт! Використовуй кнопки нижче:",
         reply_markup=reply_markup,
     )
 
 
-# === Обробка натискання кнопок ===
+# === КНОПКИ ===
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -129,39 +155,45 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = query.data
+    schedule = load_schedule()
+
     if data == "show":
-        schedule = load_schedule()
         await query.edit_message_text(get_today_message(schedule))
+
+    elif data == "show_week":
+        msg = "🗓 Графік на тиждень:\n\n"
+        for cafe, shifts in schedule.items():
+            msg += f"{cafe}:\n"
+            for day, person in shifts.items():
+                msg += f"{day}: {person}\n"
+            msg += "\n"
+        await query.edit_message_text(msg)
+
     elif data == "update":
         await query.edit_message_text(
-            "Щоб змінити зміну, використай команду:\n/update Cafe Day Person\n"
+            "Формат:\n/update Cafe Day Person\n"
             "Приклад:\n/update DailyDose1 Wed Олена"
         )
+
     elif data == "template":
-        # Надсилаємо пустий макет
-        template = "\n".join([f"{c}:\nMon: \nTue: \nWed: \nThu: \nFri: \nSat: \nSun:" for c in GROUP_TOPICS.keys()])
-        await query.edit_message_text(f"Макет для заповнення:\n\n{template}")
+        template = "\n".join(
+            [f"{c}:\nMon: \nTue: \nWed: \nThu: \nFri: \nSat: \nSun:" for c in GROUP_TOPICS.keys()]
+        )
+        await query.edit_message_text(f"Макет:\n\n{template}")
+
+    elif data == "addmix_btn":
+        await query.edit_message_text("Відправ новий мікс командою:\n/addmix Текст міксу")
+
     elif data == "testsend":
         await send_daily(context)
         await query.edit_message_text("Тестова розсилка надіслана ✅")
 
 
-# === Текстові команди ===
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update) or update.effective_chat.type != "private":
-        return
-
-    schedule = parse_text_schedule(update.message.text)
-    if schedule:
-        save_schedule(schedule)
-        await update.message.reply_text("Графік збережено ✅")
-    else:
-        await update.message.reply_text("❌ Не вдалося розпізнати графік")
-
-
+# === ОНОВЛЕННЯ ЗМІНИ ===
 async def update_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
+
     if len(context.args) < 3:
         await update.message.reply_text(
             "Формат:\n/update Cafe Day Person\n"
@@ -170,25 +202,80 @@ async def update_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     cafe, day_short, person = context.args[0], context.args[1], " ".join(context.args[2:])
+
     if day_short not in DAYS:
         await update.message.reply_text("Використовуй: Mon Tue Wed Thu Fri Sat Sun")
         return
 
     schedule = load_schedule()
+
     if cafe not in schedule:
         await update.message.reply_text("Такого закладу нема")
         return
 
     schedule[cafe][DAYS[day_short]] = person
     save_schedule(schedule)
+
     await update.message.reply_text(f"Зміна оновлена ✅ {cafe} {DAYS[day_short]}: {person}")
 
 
-# === Щоденна розсилка ===
+# === ДОДАТИ МІКС ===
+async def add_mix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Формат:\n/addmix Текст міксу")
+        return
+
+    mix_text = " ".join(context.args)
+
+    mixes = load_mixes()
+    mixes.append(mix_text)
+    save_mixes(mixes)
+
+    await update.message.reply_text("✅ Мікс додано")
+
+
+# === РЕАКЦІЯ НА #mixforme ===
+async def handle_mix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    text = update.message.text.strip().lower()
+
+    if text != "#mixforme":
+        return
+
+    chat_id = update.effective_chat.id
+    topic_id = update.message.message_thread_id
+
+    allowed = any(
+        ids["chat_id"] == chat_id and ids["topic_id"] == topic_id
+        for ids in GROUP_TOPICS.values()
+    )
+
+    if not allowed:
+        return
+
+    mixes = load_mixes()
+
+    if not mixes:
+        await update.message.reply_text("❌ База міксів порожня")
+        return
+
+    mix = random.choice(mixes)
+
+    await update.message.reply_text(f"💨 Спробуй мікс:\n{mix}")
+
+
+# === ЩОДЕННА РОЗСИЛКА ===
 async def send_daily(context: ContextTypes.DEFAULT_TYPE):
     schedule = load_schedule()
+
     for cafe, ids in GROUP_TOPICS.items():
         msg = get_today_message(schedule, cafe)
+
         await context.bot.send_message(
             chat_id=ids["chat_id"],
             message_thread_id=ids["topic_id"],
@@ -196,17 +283,22 @@ async def send_daily(context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# === Запуск бота ===
+# === ЗАПУСК ===
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("update", update_shift))
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, handle_text))
+    app.add_handler(CommandHandler("addmix", add_mix))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.ChatType.PRIVATE, handle_mix))
+
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    # Автопост о 12:00
-    app.job_queue.run_daily(send_daily, time(hour=12, minute=0))
+    app.job_queue.run_daily(
+        send_daily,
+        time(hour=12, minute=0, tzinfo=timezone("Europe/Kyiv"))
+    )
 
     print("🤖 Bot started")
     app.run_polling()
