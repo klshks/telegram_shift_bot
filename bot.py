@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import random
 from datetime import datetime, time
 from pytz import timezone
@@ -15,14 +16,13 @@ from telegram.ext import (
 )
 
 # === Налаштування ===
-TOKEN = "8482451594:AAEhmluDZfwyZaK0m6n49ln-8txdJgKgSc4"
+TOKEN = os.getenv("TOKEN")  # береться з змінних середовища Railway
 ADMIN_ID = 662089451
 
-SCHEDULE_FILE = "schedule.json"
-NEXT_SCHEDULE_FILE = "next_schedule.json"
-MIXES_FILE = "mixes.json"
-
-WAITING_FOR_NEXT_SCHEDULE = {}
+# ✅ Змінені шляхи на persistent storage
+SCHEDULE_FILE = "/data/schedule.json"
+NEXT_SCHEDULE_FILE = "/data/next_schedule.json"
+MIXES_FILE = "/data/mixes.json"
 
 GROUP_TOPICS = {
     "DailyDose1": {"chat_id": -1002299751427, "topic_id": 225},
@@ -43,15 +43,14 @@ DAYS = {
 }
 
 
-# ==========================
-# УТИЛІТИ
-# ==========================
-
+# === Перевірка адміна ===
 def is_admin(update: Update) -> bool:
     return update.effective_user and update.effective_user.id == ADMIN_ID
 
 
+# === Робота з файлами ===
 def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # створюємо папку, якщо нема
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -64,15 +63,8 @@ def load_json(path, default):
         return json.load(f)
 
 
-def empty_schedule_template():
-    return {
-        cafe: {day: "" for day in DAYS.values()}
-        for cafe in GROUP_TOPICS.keys()
-    }
-
-
 def load_schedule():
-    return load_json(SCHEDULE_FILE, empty_schedule_template())
+    return load_json(SCHEDULE_FILE, {})
 
 
 def save_schedule(schedule):
@@ -80,7 +72,7 @@ def save_schedule(schedule):
 
 
 def load_next_schedule():
-    return load_json(NEXT_SCHEDULE_FILE, empty_schedule_template())
+    return load_json(NEXT_SCHEDULE_FILE, {})
 
 
 def save_next_schedule(schedule):
@@ -95,26 +87,7 @@ def save_mixes(mixes):
     save_json(MIXES_FILE, mixes)
 
 
-def main_menu_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("📅 Показати сьогодні", callback_data="show")],
-        [InlineKeyboardButton("🗓 Графік на тиждень", callback_data="show_week")],
-        [InlineKeyboardButton("🆕 Новий графік на наступний тиждень", callback_data="new_next_week")],
-        [InlineKeyboardButton("🚀 Активувати новий графік зараз", callback_data="activate_now")],
-        [InlineKeyboardButton("🔄 Змінити зміну", callback_data="update")],
-        [InlineKeyboardButton("📝 Макет графіку", callback_data="template")],
-        [InlineKeyboardButton("➕ Додати мікс", callback_data="addmix_btn")],
-        [InlineKeyboardButton("📨 Тестова розсилка", callback_data="testsend")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def back_keyboard():
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
-    )
-
-
+# === Повідомлення на сьогодні ===
 def get_today_message(schedule, cafe=None):
     today = datetime.today().strftime("%A")
 
@@ -126,28 +99,50 @@ def get_today_message(schedule, cafe=None):
     for c in GROUP_TOPICS.keys():
         person = schedule.get(c, {}).get(today, "Ніхто не запланований")
         msg += f"{c}: {person}\n"
+
     return msg
 
 
-# ==========================
-# START
-# ==========================
+# === Макет порожнього графіку ===
+def empty_schedule_template():
+    return {
+        cafe: {day: "" for day in DAYS.values()} for cafe in GROUP_TOPICS.keys()
+    }
 
+
+# === START ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
-    await context.bot.send_message(
-        chat_id=update.effective_user.id,
-        text="Головне меню:",
-        reply_markup=main_menu_keyboard(),
+    keyboard = [
+        [InlineKeyboardButton("📅 Показати сьогодні", callback_data="show")],
+        [InlineKeyboardButton("🗓 Графік на тиждень", callback_data="show_week")],
+        [InlineKeyboardButton("🆕 Новий графік на наступний тиждень", callback_data="new_next_week")],
+        [InlineKeyboardButton("🟢 Активувати новий графік зараз", callback_data="activate_next_week")],
+        [InlineKeyboardButton("🔄 Змінити зміну", callback_data="update")],
+        [InlineKeyboardButton("📝 Макет графіку", callback_data="template")],
+        [InlineKeyboardButton("➕ Додати мікс", callback_data="addmix_btn")],
+        [InlineKeyboardButton("📨 Тестова розсилка", callback_data="testsend")],
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.effective_chat.type != "private":
+        await context.bot.send_message(
+            chat_id=update.effective_user.id,
+            text="Привіт! Використовуй меню нижче:",
+            reply_markup=reply_markup,
+        )
+        return
+
+    await update.message.reply_text(
+        "Привіт! Використовуй кнопки нижче:",
+        reply_markup=reply_markup,
     )
 
 
-# ==========================
-# CALLBACK КНОПКИ
-# ==========================
-
+# === КНОПКИ ===
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -157,12 +152,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     schedule = load_schedule()
+    next_schedule = load_next_schedule()
 
-    if data == "back":
-        await query.edit_message_text("Головне меню:", reply_markup=main_menu_keyboard())
-
-    elif data == "show":
-        await query.edit_message_text(get_today_message(schedule), reply_markup=back_keyboard())
+    if data == "show":
+        await query.edit_message_text(get_today_message(schedule))
 
     elif data == "show_week":
         msg = "🗓 Графік на тиждень:\n\n"
@@ -171,152 +164,130 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for day, person in shifts.items():
                 msg += f"{day}: {person}\n"
             msg += "\n"
-        await query.edit_message_text(msg, reply_markup=back_keyboard())
-
-    elif data == "activate_now":
-        success = await transfer_schedule(context)
-        if success:
-            await query.edit_message_text("✅ Новий графік активовано", reply_markup=back_keyboard())
-        else:
-            await query.edit_message_text("⚠️ Новий графік порожній", reply_markup=back_keyboard())
+        await query.edit_message_text(msg)
 
     elif data == "new_next_week":
-        template = empty_schedule_template()
-        save_next_schedule(template)
+        next_schedule = empty_schedule_template()
+        save_next_schedule(next_schedule)
 
-        text = "🆕 Заповни цей графік і відправ його у відповідь:\n\n"
-        for cafe in template:
-            text += f"{cafe}:\n"
-            for day in template[cafe]:
-                text += f"{day}: \n"
-            text += "\n"
+        template_text = "🆕 Створено новий графік на наступний тиждень:\n\n"
+        for cafe in next_schedule:
+            template_text += f"{cafe}:\n"
+            for day in next_schedule[cafe]:
+                template_text += f"{day}: \n"
+            template_text += "\n"
 
-        WAITING_FOR_NEXT_SCHEDULE[update.effective_user.id] = True
-        await query.edit_message_text(text, reply_markup=back_keyboard())
+        await query.edit_message_text(template_text + "\nВідправ заповнений макет у відповідь JSON/текстом.")
+
+    elif data == "activate_next_week":
+        if not next_schedule:
+            await query.edit_message_text("❌ Новий графік відсутній.")
+        else:
+            save_schedule(next_schedule)
+            save_next_schedule(empty_schedule_template())
+            await query.edit_message_text("✅ Новий графік активовано і тепер діє.")
 
     elif data == "update":
         await query.edit_message_text(
-            "Формат:\n/update Cafe Day Person\nПриклад:\n/update DailyDose1 Wed Олена",
-            reply_markup=back_keyboard(),
+            "Формат:\n/update Cafe Day Person\n"
+            "Приклад:\n/update DailyDose1 Wed Олена"
         )
 
     elif data == "template":
         template = "\n".join(
-            [f"{c}:\nMon:\nTue:\nWed:\nThu:\nFri:\nSat:\nSun:\n" for c in GROUP_TOPICS.keys()]
+            [f"{c}:\nMon: \nTue: \nWed: \nThu: \nFri: \nSat: \nSun:" for c in GROUP_TOPICS.keys()]
         )
-        await query.edit_message_text(f"Макет:\n\n{template}", reply_markup=back_keyboard())
+        await query.edit_message_text(f"Макет:\n\n{template}")
 
     elif data == "addmix_btn":
-        await query.edit_message_text("Відправ новий мікс:\n/addmix Текст", reply_markup=back_keyboard())
+        await query.edit_message_text("Відправ новий мікс командою:\n/addmix Текст міксу")
 
     elif data == "testsend":
         await send_daily(context)
-        await query.edit_message_text("Тестова розсилка надіслана ✅", reply_markup=back_keyboard())
+        await query.edit_message_text("Тестова розсилка надіслана ✅")
 
 
-# ==========================
-# ПРИЙОМ НОВОГО ГРАФІКУ
-# ==========================
-
-async def receive_next_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if not WAITING_FOR_NEXT_SCHEDULE.get(user_id):
-        return
-
-    text = update.message.text
-    new_schedule = empty_schedule_template()
-    current_cafe = None
-
-    for line in text.split("\n"):
-        line = line.strip()
-
-        if not line:
-            continue
-
-        if line.endswith(":") and line[:-1] in GROUP_TOPICS:
-            current_cafe = line[:-1]
-            continue
-
-        if ":" in line and current_cafe:
-            day, person = line.split(":", 1)
-            day = day.strip()
-            person = person.strip()
-
-            if day in DAYS.values():
-                new_schedule[current_cafe][day] = person
-
-    save_next_schedule(new_schedule)
-    WAITING_FOR_NEXT_SCHEDULE[user_id] = False
-    await update.message.reply_text("✅ Новий графік збережено")
-
-
-# ==========================
-# ПЕРЕНЕСЕННЯ ГРАФІКУ
-# ==========================
-
-async def transfer_schedule(context: ContextTypes.DEFAULT_TYPE):
-    next_schedule = load_next_schedule()
-
-    if not any(any(person for person in cafe.values()) for cafe in next_schedule.values()):
-        await context.bot.send_message(chat_id=ADMIN_ID, text="⚠️ Новий графік не заповнений!")
-        return False
-
-    save_schedule(next_schedule)
-    save_next_schedule(empty_schedule_template())
-
-    await context.bot.send_message(chat_id=ADMIN_ID, text="✅ Новий графік перенесено")
-    return True
-
-
-async def sunday_check(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now(timezone("Europe/Kyiv"))
-    if now.weekday() != 6:
-        return
-
-    success = await transfer_schedule(context)
-
-    if not success:
-        context.job_queue.run_once(transfer_schedule, 3600)
-
-
-# ==========================
-# ІСНУЮЧИЙ ФУНКЦІОНАЛ
-# ==========================
-
+# === ОНОВЛЕННЯ ЗМІНИ ===
 async def update_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
+    if len(context.args) < 3:
+        await update.message.reply_text(
+            "Формат:\n/update Cafe Day Person\n"
+            "Приклад:\n/update DailyDose1 Wed Олена"
+        )
+        return
+
     cafe, day_short, person = context.args[0], context.args[1], " ".join(context.args[2:])
+
+    if day_short not in DAYS:
+        await update.message.reply_text("Використовуй: Mon Tue Wed Thu Fri Sat Sun")
+        return
+
     schedule = load_schedule()
+
+    if cafe not in schedule:
+        await update.message.reply_text("Такого закладу нема")
+        return
+
     schedule[cafe][DAYS[day_short]] = person
     save_schedule(schedule)
 
-    await update.message.reply_text("Зміна оновлена ✅")
+    await update.message.reply_text(f"Зміна оновлена ✅ {cafe} {DAYS[day_short]}: {person}")
 
 
+# === ДОДАТИ МІКС ===
 async def add_mix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Формат:\n/addmix Текст міксу")
+        return
+
     mix_text = " ".join(context.args)
+
     mixes = load_mixes()
     mixes.append(mix_text)
     save_mixes(mixes)
+
     await update.message.reply_text("✅ Мікс додано")
 
 
+# === РЕАКЦІЯ НА #mixforme ===
 async def handle_mix(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text.strip().lower() != "#mixforme":
+    if not update.message:
+        return
+
+    text = update.message.text.strip().lower()
+
+    if text != "#mixforme":
+        return
+
+    chat_id = update.effective_chat.id
+    topic_id = update.message.message_thread_id
+
+    allowed = any(
+        ids["chat_id"] == chat_id and ids["topic_id"] == topic_id
+        for ids in GROUP_TOPICS.values()
+    )
+
+    if not allowed:
         return
 
     mixes = load_mixes()
+
     if not mixes:
         await update.message.reply_text("❌ База міксів порожня")
         return
 
     mix = random.choice(mixes)
+
     await update.message.reply_text(f"💨 Спробуй мікс:\n{mix}")
 
 
+# === ЩОДЕННА РОЗСИЛКА ===
 async def send_daily(context: ContextTypes.DEFAULT_TYPE):
     schedule = load_schedule()
 
@@ -330,10 +301,7 @@ async def send_daily(context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ==========================
-# ЗАПУСК
-# ==========================
-
+# === ЗАПУСК ===
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -341,19 +309,14 @@ def main():
     app.add_handler(CommandHandler("update", update_shift))
     app.add_handler(CommandHandler("addmix", add_mix))
 
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, receive_next_schedule))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.ChatType.PRIVATE, handle_mix))
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
+    # ✅ Щоденна розсилка о 12:00 Kyiv
     app.job_queue.run_daily(
         send_daily,
         time(hour=12, minute=0, tzinfo=timezone("Europe/Kyiv"))
-    )
-
-    app.job_queue.run_daily(
-        sunday_check,
-        time(hour=22, minute=0, tzinfo=timezone("Europe/Kyiv"))
     )
 
     print("🤖 Bot started")
