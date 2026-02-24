@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # === Налаштування ===
-TOKEN = os.getenv("TOKEN").strip()
+TOKEN = "8482451594:AAEhmluDZfwyZaK0m6n49ln-8txdJgKgSc4"
 ADMIN_ID = 662089451
 
 # ✅ Змінені шляхи на persistent storage
