@@ -1,44 +1,44 @@
 {
   "DailyDose1": {
-    "Monday": "Денис",
-    "Tuesday": "Артур",
+    "Monday": "Артур",
+    "Tuesday": "Денис",
     "Wednesday": "Денис",
     "Thursday": "Денис",
-    "Friday": "Денис",
-    "Saturday": "Захар",
+    "Friday": "Артур",
+    "Saturday": "Денис",
     "Sunday": "Захар"
   },
   "DailyDose2": {
-    "Monday": "Олексій",
-    "Tuesday": "Денис",
-    "Wednesday": "Денис",
+    "Monday": "Василь",
+    "Tuesday": "Олексій",
+    "Wednesday": "Олексій",
     "Thursday": "вуйко Василь",
     "Friday": "вуйко Василь",
     "Saturday": "вуйко Василь",
-    "Sunday": "вуйко Василь"
+    "Sunday": "Олексій"
   },
   "DailyDose3": {
     "Monday": "Джан",
     "Tuesday": "Джан",
     "Wednesday": "Захар",
     "Thursday": "Джан",
-    "Friday": "Джан",
-    "Saturday": "Джан/Денис",
-    "Sunday": "Захар/Олексій"
+    "Friday": "Захар/Денис",
+    "Saturday": "Джан",
+    "Sunday": "Джан"
   },
   "Citadell": {
-    "Monday": "Захар",
-    "Tuesday": "Макс",
+    "Monday": "Макс",
+    "Tuesday": "Захар",
     "Wednesday": "Макс",
-    "Thursday": "Захар",
+    "Thursday": "Макс",
     "Friday": "Макс",
     "Saturday": "Макс",
     "Sunday": "Макс"
   },
   "Rafael": {
-    "Monday": "Ілля",
-    "Tuesday": "Олексій",
-    "Wednesday": "Олексій",
+    "Monday": "Олексій",
+    "Tuesday": "Ілля",
+    "Wednesday": "Ілля",
     "Thursday": "Олексій",
     "Friday": "Олексій",
     "Saturday": "Ілля",
