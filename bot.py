@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # === Налаштування ===
-TOKEN = os.getenv("TOKEN")  # береться з змінних середовища Railway
+TOKEN = os.getenv("TOKEN").strip()
 ADMIN_ID = 662089451
 
 # ✅ Змінені шляхи на persistent storage
