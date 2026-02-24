@@ -20,6 +20,7 @@ TOKEN = "8482451594:AAEhmluDZfwyZaK0m6n49ln-8txdJgKgSc4"
 ADMIN_ID = 662089451
 
 SCHEDULE_FILE = "schedule.json"
+NEXT_SCHEDULE_FILE = "next_schedule.json"
 MIXES_FILE = "mixes.json"
 
 GROUP_TOPICS = {
@@ -68,36 +69,20 @@ def save_schedule(schedule):
     save_json(SCHEDULE_FILE, schedule)
 
 
+def load_next_schedule():
+    return load_json(NEXT_SCHEDULE_FILE, {})
+
+
+def save_next_schedule(schedule):
+    save_json(NEXT_SCHEDULE_FILE, schedule)
+
+
 def load_mixes():
     return load_json(MIXES_FILE, [])
 
 
 def save_mixes(mixes):
     save_json(MIXES_FILE, mixes)
-
-
-# === Парсинг графіку ===
-def parse_text_schedule(text: str):
-    schedule = {}
-    current_cafe = None
-
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-
-        if line.endswith(":"):
-            current_cafe = line[:-1]
-            schedule[current_cafe] = {}
-            continue
-
-        if current_cafe:
-            m = re.match(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*[:\-]\s*(.+)", line)
-            if m:
-                day_short, name = m.groups()
-                schedule[current_cafe][DAYS[day_short]] = name.strip()
-
-    return schedule
 
 
 # === Повідомлення на сьогодні ===
@@ -116,6 +101,13 @@ def get_today_message(schedule, cafe=None):
     return msg
 
 
+# === Макет порожнього графіку ===
+def empty_schedule_template():
+    return {
+        cafe: {day: "" for day in DAYS.values()} for cafe in GROUP_TOPICS.keys()
+    }
+
+
 # === START ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
@@ -124,6 +116,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📅 Показати сьогодні", callback_data="show")],
         [InlineKeyboardButton("🗓 Графік на тиждень", callback_data="show_week")],
+        [InlineKeyboardButton("🆕 Новий графік на наступний тиждень", callback_data="new_next_week")],
         [InlineKeyboardButton("🔄 Змінити зміну", callback_data="update")],
         [InlineKeyboardButton("📝 Макет графіку", callback_data="template")],
         [InlineKeyboardButton("➕ Додати мікс", callback_data="addmix_btn")],
@@ -168,6 +161,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg += f"{day}: {person}\n"
             msg += "\n"
         await query.edit_message_text(msg)
+
+    elif data == "new_next_week":
+        next_schedule = empty_schedule_template()
+        save_next_schedule(next_schedule)
+
+        template_text = "🆕 Створено новий графік на наступний тиждень:\n\n"
+        for cafe in next_schedule:
+            template_text += f"{cafe}:\n"
+            for day in next_schedule[cafe]:
+                template_text += f"{day}: \n"
+            template_text += "\n"
+
+        await query.edit_message_text(template_text)
 
     elif data == "update":
         await query.edit_message_text(
