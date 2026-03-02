@@ -7,3 +7,5 @@ pip install python-telegram-bot apscheduler
 python3 bot.py
 
 8482451594:AAEhmluDZfwyZaK0m6n49ln-8txdJgKgSc4
+
+TOKEN = os.getenv("TOKEN").strip()
